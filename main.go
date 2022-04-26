@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"sort"
@@ -13,9 +14,11 @@ import (
 type workType int
 
 const (
-	MK_FILE workType = iota
+	MK_FILE workType = 1 << iota
 	MK_SYMLINK
 	MK_HARDLINK
+
+	MK_OPEN
 )
 
 type work struct {
@@ -69,16 +72,53 @@ func main() {
 	}
 }
 
+const MK_DIR_EDITOR = "_MK_DIR_EDITOR"
+const MK_FILE_EDITOR = "_MK_FILE_EDITOR"
+
+func execute(exe string, args ...string) error {
+	path, err := exec.LookPath(exe)
+	if err != nil {
+		return fmt.Errorf("could not find command %q", exe)
+	}
+	cmd := exec.Command(path, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	err = cmd.Start()
+	if err != nil {
+		return fmt.Errorf("could not start editor: %v", err)
+	}
+	return nil
+}
+
+func OpenEditor(path string, isDir bool) {
+	envVar := MK_FILE_EDITOR
+	if isDir {
+		envVar = MK_DIR_EDITOR
+	}
+
+	name := os.Getenv(envVar)
+	if name == "" {
+		log.Printf("mk: don't know with editor to open, set $%s\n", envVar)
+		return
+	}
+	if err := execute(name, path); err != nil {
+		log.Printf("mk: -o: %v", err)
+		return
+	}
+	return
+}
+
 // TODO(liamvdv): the UNDO COMMAND WOULD BE AWESOME
 
 func Mk(user *user.User, invokeDir string, t work) {
-	switch t.T {
-	case MK_FILE:
+	switch {
+	case t.T & MK_FILE > 0:
 		path := t.Paths[0]
 		if err := MkFile(user, path); err != nil {
 			log.Fatalf("mk: \n")
 		}
-	case MK_SYMLINK:
+	case t.T & MK_SYMLINK > 0:
 		sym := t.Paths[0]
 		target, err := filepath.Abs(ExpandPath(user, t.Paths[1]))
 		if err != nil {
@@ -102,7 +142,7 @@ func Mk(user *user.User, invokeDir string, t work) {
 		if err := os.Symlink(target, sym); err != nil {
 			log.Fatalf("mk: failed to create symlink %s -> %s: %v\nmk: does not create missing parents when creating ", sym, target, err)
 		}
-	case MK_HARDLINK:
+	case t.T & MK_HARDLINK > 0:
 		hard := t.Paths[0]
 		target := t.Paths[1]
 		does, _, isSym := Exists(target)
@@ -116,6 +156,19 @@ func Mk(user *user.User, invokeDir string, t work) {
 		if err := os.Link(target, hard); err != nil {
 			log.Fatalf("mk: failed to create hardlink %s -> %s: %v\n", hard, target, err)
 		}
+	}
+	if t.T & MK_OPEN > 0 {
+		path := t.Paths[0]
+		ePath, err := filepath.Abs(ExpandPath(user, path))
+		if err != nil {
+			log.Printf("mk: open: failed to expand path: %v\n", err) // how should this happen??
+			return
+		}
+		does, isDir, _ := Exists(ePath)
+		if !does {
+			log.Printf("mk: open: target file %q does not exist\n", ePath)
+		}
+		OpenEditor(t.Paths[0], isDir)
 	}
 }
 
@@ -169,7 +222,9 @@ func Tasks(args []string) []work {
 	for i := 1; i < len(args); i++ {
 		slug := args[i]
 
-		if slug == "-s-" {
+		// TODO(liamvdv): need to check that ternary args are not flags... fails on -h- -s- 
+		switch slug {
+		case "-s-":
 			if i == 0 {
 				log.Fatal("mk: invalid input: mk /specify/symlink/path -s-> /target/path")
 			}
@@ -181,7 +236,7 @@ func Tasks(args []string) []work {
 			used[i] = struct{}{}
 			used[i+1] = struct{}{}
 			i++
-		} else if slug == "-h-" {
+		case "-h-":
 			if i == 0 {
 				log.Fatal("mk: invalid input: mk /specify/hardlink/path -h-> /target/path")
 			}
@@ -199,7 +254,17 @@ func Tasks(args []string) []work {
 		if _, have := used[i]; have {
 			continue
 		}
-		tasks = append(tasks, work{T: MK_FILE, Paths: []string{args[i]}})
+		t := work{}
+		if args[i] == "-o" || args[i] == "--open" {
+			// TODO(liamvdv): check that args[i+1] is not flag...
+			if i + 1 < len(args) {
+				t.T |= MK_OPEN
+				i++
+			}
+		}
+		t.T |= MK_FILE
+		t.Paths = append(t.Paths, args[i])
+		tasks = append(tasks, t)
 	}
 	return tasks
 }
