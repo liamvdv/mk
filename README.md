@@ -1,26 +1,23 @@
-# mk
+# mk 🐧
 | make files and make it easy
 
-A single command replacing `touch`, `mkdir` and `ln`. \
-Just specify a path and mk will take care of creating the missing directories **and** files. 
+mk creates directories for all paths ending on slash (`/`) and normal files otherwise.
+Make sure to place the file in a directory in your `PATH` and make it executable with `chmod +x mk`
 
 Usage:
-       mk <path> [-s- <target> | -h- <target>] ...
+       mk <path> [<path>...]
 
-make handles creating files, directories and symbolic links. \
-It unifies the unix commands 'touch' 'mkdir' and 'ln'.
+Examples
+```
+# create a file
+mk README.md
 
-Paths ending on / (slash) indicate a directory, else it's a file.
-```bash
-$ mk main.go  # create file main.go
-$ mk docs/	  # create docs folder	
-```
-Missing directories are created by default. 
-```bash
-$ mk non/existent/parent/and/file.txt   # create missing dirs and file.txt
-```
-Create symbolic links with -s- and hard links with -h-. Think of labeled edges.
-```bash
-$ mk symname -s- target/file   # create symlink:  symname -s-> target/file 
-$ mk aliasa -h- target/file    # create hardlink: aliasa -h-> target/file
+# create a directory
+mk src/
+
+# create a file and directory at the same time
+mk src/main.py
+
+# poweruser example
+mk pyproject.toml src/main.py src/__init__.py tests/unit/ tests/integ/ 
 ```
